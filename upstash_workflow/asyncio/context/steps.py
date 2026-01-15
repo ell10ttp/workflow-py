@@ -168,3 +168,72 @@ class _LazyCallStep(_BaseLazyStep[TResult]):
             call_body=self.body,
             call_headers=self.headers,
         )
+
+
+class _LazyWaitStep(_BaseLazyStep[Any]):
+    def __init__(
+        self,
+        step_name: str,
+        event_id: str,
+        timeout: Optional[Union[int, str]],
+    ):
+        super().__init__(step_name)
+        self.event_id: str = event_id
+        if timeout is None:
+            self.timeout: str = "7d"
+        elif isinstance(timeout, int):
+            self.timeout = f"{timeout}s"
+        else:
+            self.timeout = timeout
+        self.step_type: StepType = "Wait"
+
+    def get_plan_step(self, concurrent: int, target_step: int) -> Step[None, Any]:
+        return Step(
+            step_id=0,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+            target_step=target_step,
+            wait_event_id=self.event_id,
+            wait_timeout=self.timeout,
+        )
+
+    async def get_result_step(self, concurrent: int, step_id: int) -> DefaultStep:
+        return Step(
+            step_id=step_id,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+            wait_event_id=self.event_id,
+            wait_timeout=self.timeout,
+        )
+
+
+class _LazyNotifyStep(_BaseLazyStep[Any]):
+    def __init__(
+        self,
+        step_name: str,
+        event_id: str,
+        event_data: Any,
+    ):
+        super().__init__(step_name)
+        self.event_id: str = event_id
+        self.event_data: Any = event_data
+        self.step_type: StepType = "Notify"
+
+    def get_plan_step(self, concurrent: int, target_step: int) -> Step[None, Any]:
+        return Step(
+            step_id=0,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+            target_step=target_step,
+        )
+
+    async def get_result_step(self, concurrent: int, step_id: int) -> DefaultStep:
+        return Step(
+            step_id=step_id,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+        )

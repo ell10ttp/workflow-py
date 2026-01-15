@@ -88,7 +88,7 @@ def _parse_payload(raw_payload: str) -> Tuple[str, List[DefaultStep]]:
         if step.get("waitEventId", None):
             new_out = {
                 "event_data": _decode_base64(step["out"]) if step["out"] else None,
-                "timeout": step.wait_timeout or False,
+                "timeout": step.get("waitTimeout") or False,
             }
             step["out"] = new_out
 
@@ -105,6 +105,8 @@ def _parse_payload(raw_payload: str) -> Tuple[str, List[DefaultStep]]:
                 step_type=step["stepType"],
                 out=step["out"],
                 concurrent=step["concurrent"],
+                wait_event_id=step.get("waitEventId"),
+                wait_timeout=step.get("waitTimeout"),
             )
         )
 
