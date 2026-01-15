@@ -111,6 +111,8 @@ class _AutoExecutor:
                             "callMethod": single_step.call_method,
                             "callBody": single_step.call_body,
                             "callHeaders": single_step.call_headers,
+                            "waitEventId": single_step.wait_event_id,
+                            "waitTimeout": single_step.wait_timeout,
                         },
                         url=self.context.url,
                         not_before=cast(  # TODO: Change not_before type in BatchJsonRequest

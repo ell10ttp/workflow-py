@@ -79,8 +79,59 @@ The kinds of steps which are available are:
 * `context.sleep`: sleep for some time
 * `context.sleep_until`: sleep until some timestamp
 * `context.call`: make a third party call without consuming any runtime
+* `context.wait_for_event`: pause workflow until an external event occurs
+* `context.notify`: notify workflows waiting for an event
 
 You can [learn more about these methods from our documentation](https://upstash.com/docs/workflow/basics/context).
+
+### Wait for Event
+
+Workflows can pause execution and wait for external events using `wait_for_event`. This is useful for human-in-the-loop patterns, external approvals, or waiting for webhook callbacks.
+
+```python
+from upstash_workflow import AsyncWorkflowContext, WaitForEventResult
+
+@serve.post("/approval-workflow")
+async def approval_workflow(context: AsyncWorkflowContext[str]) -> None:
+    # Do some initial work
+    await context.run("prepare", lambda: "prepared")
+
+    # Wait for external approval (up to 7 days by default)
+    result: WaitForEventResult = await context.wait_for_event(
+        "wait-for-approval",
+        f"approval-{context.workflow_run_id}",
+        timeout="7d"  # optional, defaults to "7d"
+    )
+
+    if result.timeout:
+        # Handle timeout case
+        await context.run("handle-timeout", lambda: "timed out")
+    else:
+        # Use the event data
+        approval_data = result.event_data
+        await context.run("process-approval", lambda: f"approved: {approval_data}")
+```
+
+To notify a waiting workflow from outside the workflow context, use the `Client`:
+
+```python
+from upstash_workflow import Client
+
+client = Client(token="your-qstash-token")
+
+# Notify the waiting workflow
+responses = client.notify("approval-{workflow_run_id}", event_data={"approved": True})
+print(f"Notified {len(responses)} waiting workflow(s)")
+```
+
+For async applications:
+
+```python
+from upstash_workflow import AsyncClient
+
+client = AsyncClient(token="your-qstash-token")
+responses = await client.notify("approval-{workflow_run_id}", event_data={"approved": True})
+```
 
 ### Run the Server
 

@@ -67,6 +67,9 @@ class Step(Generic[TResult, TBody]):
     call_headers: Optional[Dict[str, str]] = None
     call_url: Optional[str] = None
 
+    wait_event_id: Optional[str] = None
+    wait_timeout: Optional[str] = None
+
 
 DefaultStep = Step[Any, Any]
 
@@ -100,3 +103,22 @@ class CallResponseDict(TypedDict):
     status: int
     body: Any
     header: Dict[str, List[str]]
+
+
+@dataclass
+class WaitForEventResult:
+    event_data: Optional[Any]
+    timeout: bool
+
+
+@dataclass
+class NotifyResult:
+    event_id: str
+    notified_count: int
+
+
+@dataclass
+class NotifyResponse:
+    message_id: str
+    waiter_url: str
+    waiter_deadline: int

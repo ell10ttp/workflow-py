@@ -20,6 +20,8 @@ from upstash_workflow.asyncio.context.steps import (
     _LazySleepStep,
     _LazySleepUntilStep,
     _LazyCallStep,
+    _LazyWaitStep,
+    _LazyNotifyStep,
     _BaseLazyStep,
 )
 from upstash_workflow.types import (
@@ -27,6 +29,8 @@ from upstash_workflow.types import (
     HTTPMethods,
     CallResponse,
     CallResponseDict,
+    WaitForEventResult,
+    NotifyResult,
 )
 
 TInitialPayload = TypeVar("TInitialPayload")
@@ -170,6 +174,61 @@ class WorkflowContext(Generic[TInitialPayload]):
             )
         except Exception:
             return cast(CallResponse[Any], result)
+
+    async def wait_for_event(
+        self,
+        step_name: str,
+        event_id: str,
+        *,
+        timeout: Optional[Union[int, str]] = None,
+    ) -> WaitForEventResult:
+        """
+        Pauses workflow execution and waits for an external event.
+
+        When the workflow reaches this step, it exits but stores a waiter.
+        When `notify()` is called with the same event_id, the workflow
+        resumes with the provided event data.
+
+        ```python
+        result = await context.wait_for_event("wait-for-approval", "approval-123", timeout="7d")
+        if result.timeout:
+            # Handle timeout
+            pass
+        else:
+            # Use result.event_data
+            pass
+        ```
+
+        :param step_name: name of the step
+        :param event_id: unique identifier for the event to wait for
+        :param timeout: maximum time to wait (e.g., "7d", "1h", 300). Defaults to "7d"
+        :return: WaitForEventResult with event_data and timeout flag
+        """
+        return await self._add_step(_LazyWaitStep(step_name, event_id, timeout))
+
+    async def notify(
+        self,
+        step_name: str,
+        event_id: str,
+        event_data: Any = None,
+    ) -> NotifyResult:
+        """
+        Notifies workflows waiting for the specified event.
+
+        This will resume any workflows that are waiting for this event_id
+        via `wait_for_event()`.
+
+        ```python
+        result = await context.notify("notify-approval", "approval-123", {"approved": True})
+        print(f"Notified {result.notified_count} workflows")
+        ```
+
+        :param step_name: name of the step
+        :param event_id: unique identifier for the event to notify
+        :param event_data: data to pass to waiting workflows
+        :return: NotifyResult with event_id and notified_count
+        """
+        return await self._add_step(_LazyNotifyStep(step_name, event_id, event_data))
 
     async def _add_step(self, step: _BaseLazyStep[TResult]) -> TResult:
         """
