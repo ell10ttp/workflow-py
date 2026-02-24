@@ -29,6 +29,7 @@ from upstash_workflow.types import (
     HTTPMethods,
     CallResponse,
     CallResponseDict,
+    FlowControl,
     WaitForEventResult,
     NotifyResult,
 )
@@ -133,6 +134,8 @@ class WorkflowContext(Generic[TInitialPayload]):
         headers: Optional[Dict[str, str]] = None,
         retries: int = 0,
         timeout: Optional[Union[int, str]] = None,
+        retry_delay: Optional[str] = None,
+        flow_control: Optional[FlowControl] = None,
     ) -> CallResponse[Any]:
         """
         Makes a third party call through QStash in order to make a network call without consuming any runtime.
@@ -156,13 +159,17 @@ class WorkflowContext(Generic[TInitialPayload]):
         :param headers: call headers
         :param retries: number of call retries. 0 by default
         :param timeout: max duration to wait for the endpoint to respond. in seconds.
+        :param retry_delay: math expression for delay between retries (in ms). Uses variable 'retried' (0-indexed).
+        :param flow_control: rate limiting / concurrency control for outbound calls.
         :return: CallResponse object containing status, body and header
         """
         headers = headers or {}
 
         result = await self._add_step(
             _LazyCallStep[CallResponseDict](
-                step_name, url, method, body, headers, retries, timeout
+                step_name, url, method, body, headers, retries, timeout,
+                retry_delay=retry_delay,
+                flow_control=flow_control,
             )
         )
 

@@ -1,17 +1,28 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, List, Union, Literal, cast, Any, TypeVar
 import json
-from qstash.message import BatchJsonRequest
+from qstash.message import BatchRequest
 from upstash_workflow.constants import NO_CONCURRENCY
 from upstash_workflow.error import WorkflowError, WorkflowAbort
 from upstash_workflow.workflow_requests import _get_headers
-from upstash_workflow.types import DefaultStep, HTTPMethods
+from upstash_workflow.types import DefaultStep, FlowControl, HTTPMethods
 from upstash_workflow.context.steps import _BaseLazyStep, _LazyCallStep
 
 if TYPE_CHECKING:
     from upstash_workflow import WorkflowContext
 
 TResult = TypeVar("TResult")
+
+
+def _flow_control_to_dict(fc: FlowControl) -> dict[str, Any]:
+    result: dict[str, Any] = {"key": fc.key}
+    if fc.rate is not None:
+        result["rate"] = fc.rate
+    if fc.parallelism is not None:
+        result["parallelism"] = fc.parallelism
+    if fc.period is not None:
+        result["period"] = fc.period
+    return result
 
 
 class _AutoExecutor:
@@ -86,43 +97,51 @@ class _AutoExecutor:
 
             single_step.out = json.dumps(single_step.out)
 
-            batch_requests.append(
-                BatchJsonRequest(
-                    headers=headers,
-                    method=cast(HTTPMethods, single_step.call_method),
-                    body=single_step.call_body,
-                    url=single_step.call_url,
-                )
-                if single_step.call_url
-                else (
-                    BatchJsonRequest(
-                        headers=headers,
-                        body={
-                            "method": "POST",
-                            "stepId": single_step.step_id,
-                            "stepName": single_step.step_name,
-                            "stepType": single_step.step_type,
-                            "out": single_step.out,
-                            "sleepFor": single_step.sleep_for,
-                            "sleepUntil": single_step.sleep_until,
-                            "concurrent": single_step.concurrent,
-                            "targetStep": single_step.target_step,
-                            "callUrl": single_step.call_url,
-                            "callMethod": single_step.call_method,
-                            "callBody": single_step.call_body,
-                            "callHeaders": single_step.call_headers,
-                            "waitEventId": single_step.wait_event_id,
-                            "waitTimeout": single_step.wait_timeout,
-                        },
-                        url=self.context.url,
-                        not_before=cast(  # TODO: Change not_before type in BatchJsonRequest
-                            Any, single_step.sleep_until if will_wait else None
-                        ),
-                        delay=cast(Any, single_step.sleep_for if will_wait else None),
-                    )
-                )
-            )
-        self.context.qstash_client.message.batch_json(batch_requests)
+            if single_step.call_url:
+                call_request: BatchRequest = {
+                    "headers": headers,
+                    "method": cast(HTTPMethods, single_step.call_method),
+                    "body": json.dumps(single_step.call_body),
+                    "content_type": "application/json",
+                    "url": single_step.call_url,
+                }
+                if isinstance(lazy_step, _LazyCallStep):
+                    if lazy_step.retry_delay is not None:
+                        call_request["retry_delay"] = lazy_step.retry_delay
+                    if lazy_step.flow_control is not None:
+                        call_request["flow_control"] = _flow_control_to_dict(lazy_step.flow_control)
+                batch_requests.append(call_request)
+            else:
+                step_body = {
+                    "method": "POST",
+                    "stepId": single_step.step_id,
+                    "stepName": single_step.step_name,
+                    "stepType": single_step.step_type,
+                    "out": single_step.out,
+                    "sleepFor": single_step.sleep_for,
+                    "sleepUntil": single_step.sleep_until,
+                    "concurrent": single_step.concurrent,
+                    "targetStep": single_step.target_step,
+                    "callUrl": single_step.call_url,
+                    "callMethod": single_step.call_method,
+                    "callBody": single_step.call_body,
+                    "callHeaders": single_step.call_headers,
+                    "waitEventId": single_step.wait_event_id,
+                    "waitTimeout": single_step.wait_timeout,
+                }
+                step_request: BatchRequest = {
+                    "headers": headers,
+                    "body": json.dumps(step_body),
+                    "content_type": "application/json",
+                    "url": self.context.url,
+                }
+                if will_wait and single_step.sleep_until:
+                    step_request["not_before"] = single_step.sleep_until
+                if will_wait and single_step.sleep_for:
+                    step_request["delay"] = single_step.sleep_for
+                batch_requests.append(step_request)
+
+        self.context.qstash_client.message.batch(batch_requests)
         raise WorkflowAbort(steps[0].step_name, steps[0])
 
 

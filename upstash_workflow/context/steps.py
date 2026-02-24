@@ -9,7 +9,7 @@ from typing import (
     TypeVar,
     Generic,
 )
-from upstash_workflow.types import StepType, Step, DefaultStep, HTTPMethods
+from upstash_workflow.types import StepType, Step, DefaultStep, HTTPMethods, FlowControl
 
 TResult = TypeVar("TResult")
 TBody = TypeVar("TBody")
@@ -128,6 +128,8 @@ class _LazyCallStep(_BaseLazyStep[TResult]):
         headers: Dict[str, str],
         retries: int,
         timeout: Optional[Union[int, str]],
+        retry_delay: Optional[str] = None,
+        flow_control: Optional[FlowControl] = None,
     ):
         super().__init__(step_name)
         self.url: str = url
@@ -136,6 +138,8 @@ class _LazyCallStep(_BaseLazyStep[TResult]):
         self.headers: Dict[str, str] = headers
         self.retries: int = retries
         self.timeout: Optional[Union[int, str]] = timeout
+        self.retry_delay: Optional[str] = retry_delay
+        self.flow_control: Optional[FlowControl] = flow_control
         self.step_type: StepType = "Call"
 
     def get_plan_step(self, concurrent: int, target_step: int) -> Step[None, Any]:

@@ -8,6 +8,7 @@ from upstash_workflow.asyncio.context.context import (
 from upstash_workflow.asyncio.serve.serve import serve as async_serve
 from upstash_workflow.types import (
     CallResponse,
+    FlowControl,
     NotifyResponse,
     WaitForEventResult,
     NotifyResult,
@@ -21,6 +22,7 @@ __all__ = [
     "AsyncWorkflowContext",
     "async_serve",
     "CallResponse",
+    "FlowControl",
     "NotifyResponse",
     "WaitForEventResult",
     "NotifyResult",

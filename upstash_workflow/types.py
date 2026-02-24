@@ -122,3 +122,11 @@ class NotifyResponse:
     message_id: str
     waiter_url: str
     waiter_deadline: int
+
+
+@dataclass
+class FlowControl:
+    key: str
+    rate: Optional[int] = None
+    parallelism: Optional[int] = None
+    period: Optional[str] = None
