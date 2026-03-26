@@ -805,7 +805,6 @@ class TestNotifyWithWorkflowRunId:
         import http.server
         import socketserver
         import threading
-        import json
 
         request_captured: dict = {}
 

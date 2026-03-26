@@ -1,5 +1,5 @@
 # Session: get-waiters
-Updated: 2026-03-26T14:50:00Z
+Updated: 2026-03-26T17:10:33.909Z
 
 ## Goal
 Add `Client.get_waiters()` / `AsyncClient.get_waiters()`, the `Waiter` type, and `workflowRunId` lookback support to the Python Workflow SDK — matching the JS SDK's waiters feature.
