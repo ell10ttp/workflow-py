@@ -1,10 +1,29 @@
 import json
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import httpx
-from upstash_workflow.types import NotifyResponse
+from upstash_workflow.types import NotifyResponse, Waiter
 
 
 DEFAULT_BASE_URL = "https://qstash.upstash.io"
+
+
+def _parse_waiter(data: Dict[str, Any]) -> Waiter:
+    return Waiter(
+        url=data.get("url", ""),
+        deadline=data.get("deadline", 0),
+        headers=data.get("headers", {}),
+        timeout_url=data.get("timeoutUrl"),
+        timeout_body=data.get("timeoutBody"),
+        timeout_headers=data.get("timeoutHeaders"),
+    )
+
+
+def _parse_notify_response(item: Dict[str, Any]) -> NotifyResponse:
+    return NotifyResponse(
+        waiter=_parse_waiter(item.get("waiter", {})),
+        message_id=item.get("messageId", ""),
+        error=item.get("error", ""),
+    )
 
 
 class Client:
@@ -20,8 +39,13 @@ class Client:
         self,
         event_id: str,
         event_data: Any = None,
+        workflow_run_id: Optional[str] = None,
     ) -> List[NotifyResponse]:
-        url = f"{self._base_url}/v2/notify/{event_id}"
+        if workflow_run_id:
+            url = f"{self._base_url}/v2/notify/{workflow_run_id}/{event_id}"
+        else:
+            url = f"{self._base_url}/v2/notify/{event_id}"
+
         headers = {
             "Authorization": f"Bearer {self._token}",
         }
@@ -38,14 +62,20 @@ class Client:
             response.raise_for_status()
             data = response.json()
 
-        return [
-            NotifyResponse(
-                message_id=item.get("messageId", ""),
-                waiter_url=item.get("waiter", {}).get("url", ""),
-                waiter_deadline=item.get("waiter", {}).get("deadline", 0),
-            )
-            for item in data
-        ]
+        return [_parse_notify_response(item) for item in data]
+
+    def get_waiters(self, event_id: str) -> List[Waiter]:
+        url = f"{self._base_url}/v2/waiters/{event_id}"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+        }
+
+        with httpx.Client() as client:
+            response = client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+        return [_parse_waiter(item) for item in data]
 
 
 class AsyncClient:
@@ -61,8 +91,13 @@ class AsyncClient:
         self,
         event_id: str,
         event_data: Any = None,
+        workflow_run_id: Optional[str] = None,
     ) -> List[NotifyResponse]:
-        url = f"{self._base_url}/v2/notify/{event_id}"
+        if workflow_run_id:
+            url = f"{self._base_url}/v2/notify/{workflow_run_id}/{event_id}"
+        else:
+            url = f"{self._base_url}/v2/notify/{event_id}"
+
         headers = {
             "Authorization": f"Bearer {self._token}",
         }
@@ -79,11 +114,17 @@ class AsyncClient:
             response.raise_for_status()
             data = response.json()
 
-        return [
-            NotifyResponse(
-                message_id=item.get("messageId", ""),
-                waiter_url=item.get("waiter", {}).get("url", ""),
-                waiter_deadline=item.get("waiter", {}).get("deadline", 0),
-            )
-            for item in data
-        ]
+        return [_parse_notify_response(item) for item in data]
+
+    async def get_waiters(self, event_id: str) -> List[Waiter]:
+        url = f"{self._base_url}/v2/waiters/{event_id}"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+        return [_parse_waiter(item) for item in data]

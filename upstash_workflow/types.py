@@ -1,14 +1,14 @@
 from typing import (
     Callable,
+    Dict,
+    Generic,
+    List,
     Literal,
     Optional,
-    Dict,
-    Union,
-    List,
-    TypeVar,
-    Generic,
-    Any,
     TypedDict,
+    TypeVar,
+    Union,
+    Any,
 )
 from dataclasses import dataclass
 
@@ -138,10 +138,20 @@ class InvokableWorkflow:
 
 
 @dataclass
+class Waiter:
+    url: str
+    deadline: int
+    headers: Dict[str, List[str]]
+    timeout_url: Optional[str] = None
+    timeout_body: Optional[Any] = None
+    timeout_headers: Optional[Dict[str, List[str]]] = None
+
+
+@dataclass
 class NotifyResponse:
+    waiter: Waiter
     message_id: str
-    waiter_url: str
-    waiter_deadline: int
+    error: str
 
 
 def create_workflow(
