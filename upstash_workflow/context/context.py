@@ -223,6 +223,7 @@ class WorkflowContext(Generic[TInitialPayload]):
         step_name: str,
         event_id: str,
         event_data: Any = None,
+        workflow_run_id: Optional[str] = None,
     ) -> NotifyResult:
         """
         Notifies workflows waiting for the specified event.
@@ -238,9 +239,12 @@ class WorkflowContext(Generic[TInitialPayload]):
         :param step_name: name of the step
         :param event_id: unique identifier for the event to notify
         :param event_data: data to pass to waiting workflows
+        :param workflow_run_id: optional workflow run ID for lookback targeting
         :return: NotifyResult with event_id and notified_count
         """
-        return self._add_step(_LazyNotifyStep(step_name, event_id, event_data))
+        return self._add_step(
+            _LazyNotifyStep(step_name, event_id, event_data, workflow_run_id)
+        )
 
     def invoke(
         self,

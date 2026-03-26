@@ -1,3 +1,4 @@
+import inspect
 import pytest
 from dataclasses import is_dataclass
 
@@ -573,3 +574,379 @@ class TestAsyncClientClass:
             assert result == []
         finally:
             await runner.cleanup()
+
+
+class TestWaiterType:
+    def test_waiter_is_dataclass(self) -> None:
+        from upstash_workflow.types import Waiter
+
+        assert is_dataclass(Waiter)
+
+    def test_waiter_has_required_fields(self) -> None:
+        from upstash_workflow.types import Waiter
+
+        waiter = Waiter(
+            url="https://example.com/workflow",
+            deadline=1234567890,
+            headers={"Upstash-Workflow-RunId": ["wfr-123"]},
+        )
+        assert waiter.url == "https://example.com/workflow"
+        assert waiter.deadline == 1234567890
+        assert waiter.headers == {"Upstash-Workflow-RunId": ["wfr-123"]}
+
+    def test_waiter_optional_fields_default_to_none(self) -> None:
+        from upstash_workflow.types import Waiter
+
+        waiter = Waiter(url="https://example.com", deadline=0, headers={})
+        assert waiter.timeout_url is None
+        assert waiter.timeout_body is None
+        assert waiter.timeout_headers is None
+
+    def test_waiter_with_all_fields(self) -> None:
+        from upstash_workflow.types import Waiter
+
+        waiter = Waiter(
+            url="https://example.com/workflow",
+            deadline=1234567890,
+            headers={"Content-Type": ["application/json"]},
+            timeout_url="https://example.com/timeout",
+            timeout_body={"status": "timed_out"},
+            timeout_headers={"X-Timeout": ["true"]},
+        )
+        assert waiter.timeout_url == "https://example.com/timeout"
+        assert waiter.timeout_body == {"status": "timed_out"}
+        assert waiter.timeout_headers == {"X-Timeout": ["true"]}
+
+    def test_waiter_is_exported_from_package(self) -> None:
+        from upstash_workflow import Waiter
+
+        assert Waiter is not None
+
+
+class TestUpdatedNotifyResponse:
+    def test_notify_response_has_waiter_field(self) -> None:
+        from upstash_workflow.types import NotifyResponse, Waiter
+
+        waiter = Waiter(url="https://example.com", deadline=123, headers={})
+        response = NotifyResponse(waiter=waiter, message_id="msg-1", error="")
+        assert response.waiter is waiter
+
+    def test_notify_response_has_error_field(self) -> None:
+        from upstash_workflow.types import NotifyResponse, Waiter
+
+        waiter = Waiter(url="https://example.com", deadline=123, headers={})
+        response = NotifyResponse(waiter=waiter, message_id="msg-1", error="some error")
+        assert response.error == "some error"
+
+    def test_notify_response_empty_error(self) -> None:
+        from upstash_workflow.types import NotifyResponse, Waiter
+
+        waiter = Waiter(url="https://example.com", deadline=123, headers={})
+        response = NotifyResponse(waiter=waiter, message_id="msg-1", error="")
+        assert response.error == ""
+
+
+class TestClientGetWaiters:
+    def test_client_has_get_waiters_method(self) -> None:
+        from upstash_workflow import Client
+
+        assert hasattr(Client, "get_waiters")
+        assert callable(getattr(Client, "get_waiters"))
+
+    def test_async_client_has_get_waiters_method(self) -> None:
+        from upstash_workflow import AsyncClient
+
+        assert hasattr(AsyncClient, "get_waiters")
+        assert callable(getattr(AsyncClient, "get_waiters"))
+
+    def test_sync_client_get_waiters(self) -> None:
+        from upstash_workflow import Client
+        from upstash_workflow.types import Waiter
+        from tests.utils import MOCK_QSTASH_SERVER_PORT
+        import http.server
+        import socketserver
+        import threading
+        import json
+
+        request_captured: dict = {}
+
+        class CaptureHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                request_captured["method"] = self.command
+                request_captured["path"] = self.path
+                request_captured["auth"] = self.headers.get("Authorization")
+
+                response = json.dumps(
+                    [
+                        {
+                            "url": "https://example.com/workflow-a",
+                            "deadline": 1700000000,
+                            "headers": {"X-Wf": ["wfr-1"]},
+                            "timeoutUrl": "https://example.com/timeout",
+                            "timeoutBody": None,
+                            "timeoutHeaders": {"X-Timeout": ["true"]},
+                        },
+                        {
+                            "url": "https://example.com/workflow-b",
+                            "deadline": 1700001000,
+                            "headers": {},
+                        },
+                    ]
+                )
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(response.encode())
+
+            def log_message(self, format, *args) -> None:
+                pass
+
+        class ThreadedServer(socketserver.TCPServer):
+            allow_reuse_address = True
+
+        server = ThreadedServer(("localhost", MOCK_QSTASH_SERVER_PORT), CaptureHandler)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+
+        try:
+            client = Client(
+                token="test-token",
+                base_url=f"http://localhost:{MOCK_QSTASH_SERVER_PORT}",
+            )
+            result = client.get_waiters("my-event")
+
+            assert request_captured["method"] == "GET"
+            assert request_captured["path"] == "/v2/waiters/my-event"
+            assert request_captured["auth"] == "Bearer test-token"
+
+            assert len(result) == 2
+            assert isinstance(result[0], Waiter)
+            assert result[0].url == "https://example.com/workflow-a"
+            assert result[0].deadline == 1700000000
+            assert result[0].headers == {"X-Wf": ["wfr-1"]}
+            assert result[0].timeout_url == "https://example.com/timeout"
+            assert result[0].timeout_headers == {"X-Timeout": ["true"]}
+
+            assert result[1].url == "https://example.com/workflow-b"
+            assert result[1].timeout_url is None
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    @pytest.mark.asyncio
+    async def test_async_client_get_waiters(self) -> None:
+        from upstash_workflow import AsyncClient
+        from upstash_workflow.types import Waiter
+        from tests.utils import MOCK_QSTASH_SERVER_PORT
+        from aiohttp import web
+
+        request_captured = {}
+
+        async def handle_get_waiters(request):
+            request_captured["method"] = request.method
+            request_captured["path"] = request.path
+            return web.json_response(
+                data=[
+                    {
+                        "url": "https://example.com/workflow-a",
+                        "deadline": 1700000000,
+                        "headers": {"X-Wf": ["wfr-1"]},
+                    }
+                ],
+                status=200,
+            )
+
+        app = web.Application()
+        app.router.add_route("GET", "/v2/waiters/{event_id}", handle_get_waiters)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "localhost", MOCK_QSTASH_SERVER_PORT)
+
+        try:
+            await site.start()
+            client = AsyncClient(
+                token="test-token",
+                base_url=f"http://localhost:{MOCK_QSTASH_SERVER_PORT}",
+            )
+            result = await client.get_waiters("my-event")
+
+            assert request_captured["method"] == "GET"
+            assert request_captured["path"] == "/v2/waiters/my-event"
+
+            assert len(result) == 1
+            assert isinstance(result[0], Waiter)
+            assert result[0].url == "https://example.com/workflow-a"
+        finally:
+            await runner.cleanup()
+
+
+class TestNotifyWithWorkflowRunId:
+    def test_notify_accepts_workflow_run_id_param(self) -> None:
+        from upstash_workflow import Client
+
+        sig = inspect.signature(Client.notify)
+        params = sig.parameters
+        assert "workflow_run_id" in params
+        assert params["workflow_run_id"].default is None
+
+    def test_async_notify_accepts_workflow_run_id_param(self) -> None:
+        from upstash_workflow import AsyncClient
+
+        sig = inspect.signature(AsyncClient.notify)
+        params = sig.parameters
+        assert "workflow_run_id" in params
+        assert params["workflow_run_id"].default is None
+
+    def test_sync_client_notify_with_workflow_run_id_uses_lookback_url(self) -> None:
+        from upstash_workflow import Client
+        from tests.utils import MOCK_QSTASH_SERVER_PORT
+        import http.server
+        import socketserver
+        import threading
+        import json
+
+        request_captured: dict = {}
+
+        class CaptureHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                request_captured["path"] = self.path
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"[]")
+
+            def log_message(self, format, *args) -> None:
+                pass
+
+        class ThreadedServer(socketserver.TCPServer):
+            allow_reuse_address = True
+
+        server = ThreadedServer(("localhost", MOCK_QSTASH_SERVER_PORT), CaptureHandler)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+
+        try:
+            client = Client(
+                token="test-token",
+                base_url=f"http://localhost:{MOCK_QSTASH_SERVER_PORT}",
+            )
+            client.notify("my-event", workflow_run_id="wfr_abc123")
+
+            assert request_captured["path"] == "/v2/notify/wfr_abc123/my-event"
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_sync_client_notify_without_workflow_run_id_uses_standard_url(self) -> None:
+        from upstash_workflow import Client
+        from tests.utils import MOCK_QSTASH_SERVER_PORT
+        import http.server
+        import socketserver
+        import threading
+
+        request_captured: dict = {}
+
+        class CaptureHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                request_captured["path"] = self.path
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"[]")
+
+            def log_message(self, format, *args) -> None:
+                pass
+
+        class ThreadedServer(socketserver.TCPServer):
+            allow_reuse_address = True
+
+        server = ThreadedServer(("localhost", MOCK_QSTASH_SERVER_PORT), CaptureHandler)
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+
+        try:
+            client = Client(
+                token="test-token",
+                base_url=f"http://localhost:{MOCK_QSTASH_SERVER_PORT}",
+            )
+            client.notify("my-event")
+
+            assert request_captured["path"] == "/v2/notify/my-event"
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    @pytest.mark.asyncio
+    async def test_async_client_notify_with_workflow_run_id(self) -> None:
+        from upstash_workflow import AsyncClient
+        from tests.utils import MOCK_QSTASH_SERVER_PORT
+        from aiohttp import web
+
+        request_captured = {}
+
+        async def capture_request(request):
+            request_captured["path"] = request.path
+            return web.json_response(data=[], status=200)
+
+        app = web.Application()
+        app.router.add_route("POST", "/{tail:.*}", capture_request)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "localhost", MOCK_QSTASH_SERVER_PORT)
+
+        try:
+            await site.start()
+            client = AsyncClient(
+                token="test-token",
+                base_url=f"http://localhost:{MOCK_QSTASH_SERVER_PORT}",
+            )
+            await client.notify("my-event", workflow_run_id="wfr_xyz789")
+
+            assert request_captured["path"] == "/v2/notify/wfr_xyz789/my-event"
+        finally:
+            await runner.cleanup()
+
+
+class TestContextNotifyWorkflowRunId:
+    def test_sync_context_notify_accepts_workflow_run_id(self) -> None:
+        from upstash_workflow import WorkflowContext
+
+        sig = inspect.signature(WorkflowContext.notify)
+        params = sig.parameters
+        assert "workflow_run_id" in params
+        assert params["workflow_run_id"].default is None
+
+    def test_async_context_notify_accepts_workflow_run_id(self) -> None:
+        from upstash_workflow import AsyncWorkflowContext
+
+        sig = inspect.signature(AsyncWorkflowContext.notify)
+        params = sig.parameters
+        assert "workflow_run_id" in params
+        assert params["workflow_run_id"].default is None
+
+    def test_lazy_notify_step_stores_workflow_run_id(self) -> None:
+        from upstash_workflow.context.steps import _LazyNotifyStep
+
+        step = _LazyNotifyStep(
+            "notify-step", "event-id", event_data=None, workflow_run_id="wfr_123"
+        )
+        assert step.workflow_run_id == "wfr_123"
+
+    def test_lazy_notify_step_workflow_run_id_defaults_to_none(self) -> None:
+        from upstash_workflow.context.steps import _LazyNotifyStep
+
+        step = _LazyNotifyStep("notify-step", "event-id", event_data=None)
+        assert step.workflow_run_id is None
+
+    def test_async_lazy_notify_step_stores_workflow_run_id(self) -> None:
+        from upstash_workflow.asyncio.context.steps import _LazyNotifyStep
+
+        step = _LazyNotifyStep(
+            "notify-step", "event-id", event_data=None, workflow_run_id="wfr_456"
+        )
+        assert step.workflow_run_id == "wfr_456"

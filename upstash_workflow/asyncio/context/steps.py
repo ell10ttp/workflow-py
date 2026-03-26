@@ -220,10 +220,12 @@ class _LazyNotifyStep(_BaseLazyStep[Any]):
         step_name: str,
         event_id: str,
         event_data: Any,
+        workflow_run_id: Optional[str] = None,
     ):
         super().__init__(step_name)
         self.event_id: str = event_id
         self.event_data: Any = event_data
+        self.workflow_run_id: Optional[str] = workflow_run_id
         self.step_type: StepType = "Notify"
 
     def get_plan_step(self, concurrent: int, target_step: int) -> Step[None, Any]:
