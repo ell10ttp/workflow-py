@@ -120,9 +120,9 @@ async def _handle_third_party_call_result(
             ):
                 _logger.warning(
                     f'Workflow Warning: "context.call" failed with status {callback_message["status"]} '
-                    f'and will retry (retried {callback_message.get("retried", 0)} out of '
-                    f'{callback_message["maxRetries"]} times). '
-                    f'Error Message:\n{base64.b64decode(callback_message.get("body", "")).decode()}'
+                    f"and will retry (retried {callback_message.get('retried', 0)} out of "
+                    f"{callback_message['maxRetries']} times). "
+                    f"Error Message:\n{base64.b64decode(callback_message.get('body', '')).decode()}"
                 )
 
                 return "call-will-retry"
@@ -177,19 +177,37 @@ async def _handle_third_party_call_result(
                 workflow_failure_url=workflow_failure_url,
             ).headers
 
-            call_response = {
-                "status": callback_message["status"],
-                "body": base64.b64decode(callback_message.get("body", "")).decode(),
-                "header": callback_message["header"],
-            }
-
-            call_result_step = {
-                "stepId": int(step_id_str),
-                "stepName": step_name,
-                "stepType": step_type,
-                "out": json.dumps(call_response),
-                "concurrent": int(concurrent_str),
-            }
+            if step_type == "Invoke":
+                # Invoke results: extract body and derive status flags
+                response_body = base64.b64decode(
+                    callback_message.get("body", "")
+                ).decode()
+                status_code = callback_message.get("status", 200)
+                invoke_response = {
+                    "body": response_body,
+                    "is_failed": not (200 <= status_code < 300),
+                    "is_canceled": status_code == 499,
+                }
+                call_result_step = {
+                    "stepId": int(step_id_str),
+                    "stepName": step_name,
+                    "stepType": step_type,
+                    "out": json.dumps(invoke_response),
+                    "concurrent": int(concurrent_str),
+                }
+            else:
+                call_response = {
+                    "status": callback_message["status"],
+                    "body": base64.b64decode(callback_message.get("body", "")).decode(),
+                    "header": callback_message["header"],
+                }
+                call_result_step = {
+                    "stepId": int(step_id_str),
+                    "stepName": step_name,
+                    "stepType": step_type,
+                    "out": json.dumps(call_response),
+                    "concurrent": int(concurrent_str),
+                }
 
             await client.message.publish_json(
                 headers=request_headers,

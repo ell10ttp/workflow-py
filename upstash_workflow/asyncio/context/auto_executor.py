@@ -6,7 +6,11 @@ from upstash_workflow.constants import NO_CONCURRENCY
 from upstash_workflow.error import WorkflowError, WorkflowAbort
 from upstash_workflow.workflow_requests import _get_headers
 from upstash_workflow.types import DefaultStep, HTTPMethods
-from upstash_workflow.asyncio.context.steps import _BaseLazyStep, _LazyCallStep
+from upstash_workflow.asyncio.context.steps import (
+    _BaseLazyStep,
+    _LazyCallStep,
+    _LazyInvokeStep,
+)
 
 if TYPE_CHECKING:
     from upstash_workflow import AsyncWorkflowContext
@@ -75,6 +79,27 @@ class _AutoExecutor:
         batch_requests = []
         for index, single_step in enumerate(steps):
             lazy_step = lazy_steps[index]
+
+            # Invoke steps use publish_json directly instead of batch
+            if isinstance(lazy_step, _LazyInvokeStep) and single_step.invoke_url:
+                headers = _get_headers(
+                    "false",
+                    self.context.workflow_run_id,
+                    self.context.url,
+                    self.context.headers,
+                    single_step,
+                    self.context.retries,
+                    invoke_retries=lazy_step.retries,
+                    workflow_failure_url=self.context.failure_url,
+                ).headers
+
+                await self.context.qstash_client.message.publish_json(
+                    url=single_step.invoke_url,
+                    body=single_step.invoke_body,
+                    headers=headers,
+                )
+                raise WorkflowAbort(single_step.step_name, single_step)
+
             headers = _get_headers(
                 "false",
                 self.context.workflow_run_id,

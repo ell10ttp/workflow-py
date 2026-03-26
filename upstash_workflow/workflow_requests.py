@@ -22,6 +22,7 @@ from upstash_workflow.constants import (
     WORKFLOW_PROTOCOL_VERSION_HEADER,
     WORKFLOW_FEATURE_HEADER,
     WORKFLOW_FAILURE_HEADER,
+    WORKFLOW_INVOKE_HEADER,
     DEFAULT_CONTENT_TYPE,
     DEFAULT_RETRIES,
 )
@@ -159,9 +160,9 @@ def _handle_third_party_call_result(
             ):
                 _logger.warning(
                     f'Workflow Warning: "context.call" failed with status {callback_message["status"]} '
-                    f'and will retry (retried {callback_message.get("retried", 0)} out of '
-                    f'{callback_message["maxRetries"]} times). '
-                    f'Error Message:\n{base64.b64decode(callback_message.get("body", "")).decode()}'
+                    f"and will retry (retried {callback_message.get('retried', 0)} out of "
+                    f"{callback_message['maxRetries']} times). "
+                    f"Error Message:\n{base64.b64decode(callback_message.get('body', '')).decode()}"
                 )
 
                 return "call-will-retry"
@@ -216,19 +217,37 @@ def _handle_third_party_call_result(
                 workflow_failure_url=workflow_failure_url,
             ).headers
 
-            call_response = {
-                "status": callback_message["status"],
-                "body": base64.b64decode(callback_message.get("body", "")).decode(),
-                "header": callback_message["header"],
-            }
-
-            call_result_step = {
-                "stepId": int(step_id_str),
-                "stepName": step_name,
-                "stepType": step_type,
-                "out": json.dumps(call_response),
-                "concurrent": int(concurrent_str),
-            }
+            if step_type == "Invoke":
+                # Invoke results: extract body and derive status flags
+                response_body = base64.b64decode(
+                    callback_message.get("body", "")
+                ).decode()
+                status_code = callback_message.get("status", 200)
+                invoke_response = {
+                    "body": response_body,
+                    "is_failed": not (200 <= status_code < 300),
+                    "is_canceled": status_code == 499,
+                }
+                call_result_step = {
+                    "stepId": int(step_id_str),
+                    "stepName": step_name,
+                    "stepType": step_type,
+                    "out": json.dumps(invoke_response),
+                    "concurrent": int(concurrent_str),
+                }
+            else:
+                call_response = {
+                    "status": callback_message["status"],
+                    "body": base64.b64decode(callback_message.get("body", "")).decode(),
+                    "header": callback_message["header"],
+                }
+                call_result_step = {
+                    "stepId": int(step_id_str),
+                    "stepName": step_name,
+                    "stepType": step_type,
+                    "out": json.dumps(call_response),
+                    "concurrent": int(concurrent_str),
+                }
 
             client.message.publish_json(
                 headers=request_headers,
@@ -263,6 +282,7 @@ def _get_headers(
     call_retries: Optional[int] = None,
     call_timeout: Optional[Union[int, str]] = None,
     workflow_failure_url: Optional[str] = None,
+    invoke_retries: Optional[int] = None,
 ) -> _HeadersResponse:
     """
     Gets headers for calling QStash
@@ -272,8 +292,12 @@ def _get_headers(
     :param workflow_url: url of the workflow endpoint
     :param step: step to get headers for. If the step is a third party call step, more
           headers are added.
+    :param invoke_retries: retries for invoke steps
     :return: headers to submit
     """
+    is_call = step and step.call_url
+    is_invoke = step and step.invoke_url
+
     base_headers = {
         WORKFLOW_INIT_HEADER: init_header_value,
         WORKFLOW_ID_HEADER: workflow_run_id,
@@ -281,7 +305,7 @@ def _get_headers(
         WORKFLOW_FEATURE_HEADER: "LazyFetch,InitialBody,WF_DetectTrigger",
     }
 
-    if not (step and step.call_url):
+    if not is_call and not is_invoke:
         base_headers[f"Upstash-Forward-{WORKFLOW_PROTOCOL_VERSION_HEADER}"] = (
             WORKFLOW_PROTOCOL_VERSION
         )
@@ -301,7 +325,7 @@ def _get_headers(
         base_headers["Upstash-Failure-Callback-Workflow-Url"] = workflow_url
         base_headers["Upstash-Failure-Callback-Workflow-Calltype"] = "failureCall"
         base_headers["Upstash-Failure-Callback-Feature-Set"] = "LazyFetch,InitialBody"
-        if step and step.call_url:
+        if is_call:
             base_headers[
                 f"Upstash-Callback-Failure-Callback-Forward-{WORKFLOW_FAILURE_HEADER}"
             ] = "true"
@@ -324,15 +348,15 @@ def _get_headers(
 
         if _should_set_retries(retries):
             base_headers["Upstash-Failure-Callback-Retries"] = str(retries)
-            if step and step.call_url:
+            if is_call:
                 base_headers["Upstash-Callback-Failure-Callback-Retries"] = str(retries)
 
-        if not step or not step.call_url:
+        if not is_call:
             base_headers["Upstash-Failure-Callback"] = workflow_failure_url
-            if step and step.call_url:
+            if is_call:
                 base_headers["Upstash-Callback-Failure-Callback"] = workflow_failure_url
 
-    if step and step.call_url:
+    if is_call:
         base_headers["Upstash-Retries"] = str(
             call_retries if call_retries is not None else 0
         )
@@ -349,7 +373,7 @@ def _get_headers(
         for header in user_headers.keys():
             header_value = user_headers.get(header)
             if header_value is not None:
-                if step and step.call_headers is not None:
+                if is_call and step.call_headers is not None:
                     base_headers[f"Upstash-Callback-Forward-{header}"] = header_value
                 else:
                     base_headers[f"Upstash-Forward-{header}"] = header_value
@@ -360,7 +384,52 @@ def _get_headers(
     content_type = user_headers.get("Content-Type") if user_headers else None
     content_type = DEFAULT_CONTENT_TYPE if content_type is None else content_type
 
-    if step and step.call_headers is not None:
+    # Invoke step: set invoke headers and callback to parent workflow
+    if is_invoke:
+        invoke_headers = {}
+
+        # Forward invoke-specific headers to the child workflow
+        invoke_headers[f"Upstash-Forward-{WORKFLOW_INVOKE_HEADER}"] = "true"
+        invoke_headers[f"Upstash-Forward-{WORKFLOW_PROTOCOL_VERSION_HEADER}"] = (
+            WORKFLOW_PROTOCOL_VERSION
+        )
+
+        # Forward user-specified invoke headers
+        if step.invoke_headers:
+            for header, value in step.invoke_headers.items():
+                invoke_headers[f"Upstash-Forward-{header}"] = value
+
+        # Set retries for the invoke message
+        if invoke_retries is not None:
+            invoke_headers["Upstash-Retries"] = str(invoke_retries)
+
+        # Set up callback so child's result comes back to parent
+        return _HeadersResponse(
+            headers={
+                **base_headers,
+                **invoke_headers,
+                WORKFLOW_INIT_HEADER: "true",
+                WORKFLOW_FEATURE_HEADER: "WF_NoDelete,InitialBody",
+                "Upstash-Callback": workflow_url,
+                "Upstash-Callback-Workflow-RunId": workflow_run_id,
+                "Upstash-Callback-Workflow-CallType": "fromCallback",
+                "Upstash-Callback-Workflow-Init": "false",
+                "Upstash-Callback-Workflow-Url": workflow_url,
+                "Upstash-Callback-Feature-Set": "LazyFetch,InitialBody",
+                "Upstash-Callback-Forward-Upstash-Workflow-Callback": "true",
+                "Upstash-Callback-Forward-Upstash-Workflow-StepId": str(step.step_id),
+                "Upstash-Callback-Forward-Upstash-Workflow-StepName": step.step_name,
+                "Upstash-Callback-Forward-Upstash-Workflow-StepType": step.step_type,
+                "Upstash-Callback-Forward-Upstash-Workflow-Concurrent": str(
+                    step.concurrent
+                ),
+                "Upstash-Callback-Forward-Upstash-Workflow-ContentType": content_type,
+                "Upstash-Workflow-CallType": "toCallback",
+            }
+        )
+
+    # Call step: set callback headers
+    if is_call and step.call_headers is not None:
         forwarded_headers = {
             f"Upstash-Forward-{header}": value
             for header, value in step.call_headers.items()
