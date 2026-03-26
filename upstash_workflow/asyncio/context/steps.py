@@ -11,7 +11,12 @@ from typing import (
     Generic,
 )
 from inspect import isawaitable
-from upstash_workflow.types import StepType, Step, DefaultStep, HTTPMethods
+from upstash_workflow.types import (
+    StepType,
+    Step,
+    DefaultStep,
+    HTTPMethods,
+)
 
 TResult = TypeVar("TResult")
 TBody = TypeVar("TBody")
@@ -236,4 +241,43 @@ class _LazyNotifyStep(_BaseLazyStep[Any]):
             step_name=self.step_name,
             step_type=self.step_type,
             concurrent=concurrent,
+        )
+
+
+class _LazyInvokeStep(_BaseLazyStep[TResult]):
+    def __init__(
+        self,
+        step_name: str,
+        url: str,
+        body: Any,
+        headers: Optional[Dict[str, str]] = None,
+        retries: Optional[int] = None,
+    ):
+        super().__init__(step_name)
+        self.url: str = url
+        self.body: Any = body
+        self.invoke_headers: Dict[str, str] = headers or {}
+        self.retries: Optional[int] = retries
+        self.step_type: StepType = "Invoke"
+
+    def get_plan_step(self, concurrent: int, target_step: int) -> Step[None, Any]:
+        return Step(
+            step_id=0,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+            target_step=target_step,
+        )
+
+    async def get_result_step(
+        self, concurrent: int, step_id: int
+    ) -> Step[TResult, Any]:
+        return Step(
+            step_id=step_id,
+            step_name=self.step_name,
+            step_type=self.step_type,
+            concurrent=concurrent,
+            invoke_url=self.url,
+            invoke_body=self.body,
+            invoke_headers=self.invoke_headers,
         )

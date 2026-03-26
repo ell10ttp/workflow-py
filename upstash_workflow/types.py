@@ -1,4 +1,5 @@
 from typing import (
+    Callable,
     Literal,
     Optional,
     Dict,
@@ -31,6 +32,7 @@ StepTypes = [
     "Call",
     "Wait",
     "Notify",
+    "Invoke",
 ]
 
 StepType = Literal[
@@ -41,6 +43,7 @@ StepType = Literal[
     "Call",
     "Wait",
     "Notify",
+    "Invoke",
 ]
 
 HTTPMethods = Literal["GET", "POST", "PUT", "DELETE", "PATCH"]
@@ -69,6 +72,10 @@ class Step(Generic[TResult, TBody]):
 
     wait_event_id: Optional[str] = None
     wait_timeout: Optional[str] = None
+
+    invoke_url: Optional[str] = None
+    invoke_body: Optional[Any] = None
+    invoke_headers: Optional[Dict[str, str]] = None
 
 
 DefaultStep = Step[Any, Any]
@@ -118,7 +125,46 @@ class NotifyResult:
 
 
 @dataclass
+class InvokeStepResponse(Generic[TResult]):
+    body: TResult
+    is_failed: bool = False
+    is_canceled: bool = False
+
+
+@dataclass
+class InvokableWorkflow:
+    route_function: Any
+    workflow_id: Optional[str] = None
+
+
+@dataclass
 class NotifyResponse:
     message_id: str
     waiter_url: str
     waiter_deadline: int
+
+
+def create_workflow(
+    route_function: Callable[..., None],
+) -> InvokableWorkflow:
+    """
+    Wraps a sync workflow route function into an InvokableWorkflow
+    that can be registered with serve_many and invoked by other workflows.
+
+    :param route_function: A sync function that uses WorkflowContext as a parameter
+    :return: An InvokableWorkflow instance
+    """
+    return InvokableWorkflow(route_function=route_function)
+
+
+def create_async_workflow(
+    route_function: Callable[..., Any],
+) -> InvokableWorkflow:
+    """
+    Wraps an async workflow route function into an InvokableWorkflow
+    that can be registered with serve_many and invoked by other workflows.
+
+    :param route_function: An async function that uses AsyncWorkflowContext as a parameter
+    :return: An InvokableWorkflow instance
+    """
+    return InvokableWorkflow(route_function=route_function)

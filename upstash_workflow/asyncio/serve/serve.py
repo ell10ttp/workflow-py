@@ -19,7 +19,7 @@ from upstash_workflow.serve.options import _determine_urls
 from upstash_workflow.asyncio.serve.options import _process_options
 from upstash_workflow.error import _format_workflow_error
 from upstash_workflow import AsyncWorkflowContext
-from upstash_workflow.types import _FinishCondition
+from upstash_workflow.types import _FinishCondition, InvokableWorkflow
 from upstash_workflow.asyncio.serve.authorization import _DisabledWorkflowContext
 
 _logger = logging.getLogger(__name__)
@@ -216,3 +216,73 @@ def serve(
         failure_function=failure_function,
         failure_url=failure_url,
     )
+
+
+def serve_many(
+    workflows: Dict[str, InvokableWorkflow],
+    *,
+    qstash_client: Optional[AsyncQStash] = None,
+    initial_payload_parser: Optional[Callable[[str], Any]] = None,
+    receiver: Optional[Receiver] = None,
+    base_url: Optional[str] = None,
+    env: Optional[Dict[str, Optional[str]]] = None,
+    retries: Optional[int] = None,
+    url: Optional[str] = None,
+    failure_url: Optional[str] = None,
+) -> Dict[str, Callable[[TRequest], Awaitable[TResponse]]]:
+    """
+    Creates an async handler that routes incoming requests to the correct workflow
+    based on the last URL path segment.
+
+    Each workflow is assigned a workflow_id matching its key in the dict,
+    enabling context.invoke() to call sibling workflows.
+
+    :param workflows: Dict mapping workflow IDs to InvokableWorkflow instances
+    :param qstash_client: AsyncQStash client
+    :param initial_payload_parser: Function to parse the initial payload
+    :param receiver: Receiver for request verification
+    :param base_url: Base URL for the workflow endpoint
+    :param env: Environment variables
+    :param retries: Number of retries (default 3)
+    :param url: URL of the endpoint
+    :param failure_url: Failure callback URL
+    :return: An async handler that routes to the correct workflow
+    """
+    # Assign workflow IDs
+    for wf_id, workflow in workflows.items():
+        workflow.workflow_id = wf_id
+
+    # Create a handler per workflow
+    handlers: Dict[str, Callable] = {}
+    for wf_id, workflow in workflows.items():
+        result = _serve_base(
+            workflow.route_function,
+            qstash_client=qstash_client,
+            initial_payload_parser=initial_payload_parser,
+            receiver=receiver,
+            base_url=base_url,
+            env=env,
+            retries=retries,
+            url=url,
+            failure_url=failure_url,
+        )
+        handlers[wf_id] = result["handler"]
+
+    async def _router(request: TRequest) -> TResponse:
+        path = request.url.rstrip("/")
+        segment = path.rsplit("/", 1)[-1]
+        # Strip query string from segment
+        if "?" in segment:
+            segment = segment.split("?", 1)[0]
+        handler = handlers.get(segment)
+        if handler is None:
+            return cast(
+                TResponse,
+                _Response(
+                    json.dumps({"error": f"Unknown workflow: {segment}"}),
+                    status=404,
+                ),
+            )
+        return await handler(request)
+
+    return {"handler": _router}

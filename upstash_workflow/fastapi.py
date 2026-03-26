@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from typing import Callable, Awaitable, cast, TypeVar, Optional, Dict, Any
 from qstash import AsyncQStash, Receiver
 from upstash_workflow import async_serve, AsyncWorkflowContext
+from upstash_workflow.asyncio.serve.serve import serve_many as _async_serve_many
+from upstash_workflow.types import InvokableWorkflow
 from upstash_workflow.workflow_types import _Response as WorkflowResponse
 
 TInitialPayload = TypeVar("TInitialPayload")
@@ -101,3 +103,77 @@ class Serve:
             return route_function
 
         return decorator
+
+    def serve_many(
+        self,
+        path: str,
+        workflows: Dict[str, InvokableWorkflow],
+        *,
+        qstash_client: Optional[AsyncQStash] = None,
+        initial_payload_parser: Optional[Callable[[str], Any]] = None,
+        receiver: Optional[Receiver] = None,
+        base_url: Optional[str] = None,
+        env: Optional[Dict[str, Optional[str]]] = None,
+        retries: Optional[int] = None,
+        url: Optional[str] = None,
+        failure_url: Optional[str] = None,
+    ) -> None:
+        """
+        Registers multiple workflows under a single base path.
+        Requests are routed by the last URL path segment matching a workflow ID.
+
+        ```python
+        from upstash_workflow.types import create_async_workflow
+
+        child = create_async_workflow(child_fn)
+        parent = create_async_workflow(parent_fn)
+
+        serve = Serve(app)
+        serve.serve_many("/api/workflows", {
+            "child": child,
+            "parent": parent,
+        })
+        ```
+
+        :param path: Base path prefix (e.g., "/api/workflows")
+        :param workflows: Dict mapping workflow IDs to InvokableWorkflow instances
+        """
+        if not (
+            qstash_client
+            or (env is not None and env.get("QSTASH_TOKEN"))
+            or (env is None and os.getenv("QSTASH_TOKEN"))
+        ):
+            raise ValueError(
+                "QSTASH_TOKEN is missing. Make sure to set it in the environment variables or pass qstash_client or env as an argument."
+            )
+
+        handler = cast(
+            Callable[[Request], Awaitable[WorkflowResponse]],
+            _async_serve_many(
+                workflows,
+                qstash_client=cast(AsyncQStash, qstash_client),
+                initial_payload_parser=initial_payload_parser,
+                receiver=receiver,
+                base_url=base_url,
+                env=env,
+                retries=retries,
+                url=url,
+                failure_url=failure_url,
+            ).get("handler"),
+        )
+
+        async def _handler_wrapper(request: Request) -> JSONResponse:
+            workflow_response: WorkflowResponse = await handler(request)
+            return JSONResponse(
+                content=json.loads(workflow_response.body),
+                status_code=workflow_response.status,
+                headers=workflow_response.headers,
+            )
+
+        # Register route with a path parameter for the workflow ID
+        normalized_path = path.rstrip("/")
+        self.app.add_api_route(
+            f"{normalized_path}/{{workflow_id}}",
+            _handler_wrapper,
+            methods=["POST"],
+        )

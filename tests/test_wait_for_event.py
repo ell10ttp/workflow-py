@@ -233,7 +233,6 @@ class TestAutoExecutorWaitStep:
         from upstash_workflow import AsyncWorkflowContext
         from upstash_workflow.error import WorkflowAbort
         from tests.utils import MOCK_QSTASH_SERVER_URL, WORKFLOW_ENDPOINT
-        from tests.asyncio.utils import mock_qstash_server
         import json
 
         qstash_client = AsyncQStash("mock-token", base_url=MOCK_QSTASH_SERVER_URL)
@@ -254,6 +253,7 @@ class TestAutoExecutorWaitStep:
 
         async def capture_request_body(request):
             import aiohttp
+
             text = await request.text()
             request_body_captured.append(json.loads(text))
             return aiohttp.web.json_response(
@@ -273,6 +273,7 @@ class TestAutoExecutorWaitStep:
         runner = web.AppRunner(app)
         await runner.setup()
         from tests.utils import MOCK_QSTASH_SERVER_PORT
+
         site = web.TCPSite(runner, "localhost", MOCK_QSTASH_SERVER_PORT)
 
         try:
@@ -286,6 +287,7 @@ class TestAutoExecutorWaitStep:
         body = batch_item["body"]
         if isinstance(body, str):
             import json as json_mod
+
             body = json_mod.loads(body)
         assert body["waitEventId"] == "my-event-123"
         assert body["waitTimeout"] == "7d"
@@ -342,15 +344,17 @@ class TestSyncClientNotify:
                 request_captured["body"] = self.rfile.read(content_length).decode()
                 request_captured["auth"] = self.headers.get("Authorization")
 
-                response = json.dumps([
-                    {
-                        "waiter": {
-                            "url": "https://example.com/workflow",
-                            "deadline": 1234567890,
-                        },
-                        "messageId": "msg-sync-123",
-                    }
-                ])
+                response = json.dumps(
+                    [
+                        {
+                            "waiter": {
+                                "url": "https://example.com/workflow",
+                                "deadline": 1234567890,
+                            },
+                            "messageId": "msg-sync-123",
+                        }
+                    ]
+                )
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
@@ -388,7 +392,6 @@ class TestSyncClientNotify:
         import http.server
         import socketserver
         import threading
-        import json
 
         request_captured: dict = {}
 
@@ -472,7 +475,6 @@ class TestAsyncClientClass:
     @pytest.mark.asyncio
     async def test_async_client_notify_calls_correct_endpoint(self) -> None:
         from upstash_workflow import AsyncClient
-        from upstash_workflow.types import NotifyResponse
         from tests.utils import MOCK_QSTASH_SERVER_URL, MOCK_QSTASH_SERVER_PORT
         from aiohttp import web
         import json

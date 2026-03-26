@@ -5,6 +5,8 @@ from werkzeug.wrappers import Response
 from typing import Callable, cast, TypeVar, Optional, Dict, Any
 from qstash import QStash, Receiver
 from upstash_workflow import serve, WorkflowContext
+from upstash_workflow.serve.serve import serve_many as _sync_serve_many
+from upstash_workflow.types import InvokableWorkflow
 from upstash_workflow.workflow_types import (
     _SyncRequest as WorkflowRequest,
     _Response as WorkflowResponse,
@@ -118,3 +120,85 @@ class Serve:
             return route_function
 
         return decorator
+
+    def serve_many(
+        self,
+        path: str,
+        workflows: Dict[str, InvokableWorkflow],
+        *,
+        qstash_client: Optional[QStash] = None,
+        initial_payload_parser: Optional[Callable[[str], Any]] = None,
+        receiver: Optional[Receiver] = None,
+        base_url: Optional[str] = None,
+        env: Optional[Dict[str, Optional[str]]] = None,
+        retries: Optional[int] = None,
+        url: Optional[str] = None,
+        failure_url: Optional[str] = None,
+    ) -> None:
+        """
+        Registers multiple workflows under a single base path.
+        Requests are routed by the last URL path segment matching a workflow ID.
+
+        ```python
+        from upstash_workflow.types import create_workflow
+
+        child = create_workflow(child_fn)
+        parent = create_workflow(parent_fn)
+
+        serve = Serve(app)
+        serve.serve_many("/api/workflows", {
+            "child": child,
+            "parent": parent,
+        })
+        ```
+
+        :param path: Base path prefix (e.g., "/api/workflows")
+        :param workflows: Dict mapping workflow IDs to InvokableWorkflow instances
+        """
+        if not (
+            qstash_client
+            or (env is not None and env.get("QSTASH_TOKEN"))
+            or (env is None and os.getenv("QSTASH_TOKEN"))
+        ):
+            raise ValueError(
+                "QSTASH_TOKEN is missing. Make sure to set it in the environment variables or pass qstash_client or env as an argument."
+            )
+
+        handler = cast(
+            Callable[[WorkflowRequest], WorkflowResponse],
+            _sync_serve_many(
+                workflows,
+                qstash_client=cast(QStash, qstash_client),
+                initial_payload_parser=initial_payload_parser,
+                receiver=receiver,
+                base_url=base_url,
+                env=env,
+                retries=retries,
+                url=url,
+                failure_url=failure_url,
+            ).get("handler"),
+        )
+
+        def _handler_wrapper(workflow_id: str) -> Response:
+            workflow_response: WorkflowResponse = handler(
+                WorkflowRequest(
+                    body=request.data.decode("utf-8"),
+                    headers=cast(Dict[str, str], request.headers),
+                    method=request.method,
+                    url=request.url,
+                    query=request.args,
+                )
+            )
+            return Response(
+                workflow_response.body,
+                status=workflow_response.status,
+                headers=workflow_response.headers,
+            )
+
+        normalized_path = path.rstrip("/")
+        self.app.add_url_rule(
+            f"{normalized_path}/<workflow_id>",
+            f"serve_many_{normalized_path}",
+            _handler_wrapper,
+            methods=["POST"],
+        )

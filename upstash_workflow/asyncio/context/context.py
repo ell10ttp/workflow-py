@@ -22,6 +22,7 @@ from upstash_workflow.asyncio.context.steps import (
     _LazyCallStep,
     _LazyWaitStep,
     _LazyNotifyStep,
+    _LazyInvokeStep,
     _BaseLazyStep,
 )
 from upstash_workflow.types import (
@@ -29,12 +30,24 @@ from upstash_workflow.types import (
     HTTPMethods,
     CallResponse,
     CallResponseDict,
+    InvokeStepResponse,
+    InvokableWorkflow,
     WaitForEventResult,
     NotifyResult,
 )
+from upstash_workflow.error import WorkflowError
 
 TInitialPayload = TypeVar("TInitialPayload")
 TResult = TypeVar("TResult")
+
+
+def _derive_invoke_url(parent_url: str, workflow_id: str) -> str:
+    """
+    Derives the child workflow URL by replacing the last path segment
+    of the parent URL with the workflow_id.
+    """
+    parts = parent_url.rstrip("/").rsplit("/", 1)
+    return f"{parts[0]}/{workflow_id}"
 
 
 class WorkflowContext(Generic[TInitialPayload]):
@@ -229,6 +242,69 @@ class WorkflowContext(Generic[TInitialPayload]):
         :return: NotifyResult with event_id and notified_count
         """
         return await self._add_step(_LazyNotifyStep(step_name, event_id, event_data))
+
+    async def invoke(
+        self,
+        step_name: str,
+        *,
+        workflow: InvokableWorkflow,
+        body: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+        retries: Optional[int] = None,
+    ) -> InvokeStepResponse[Any]:
+        """
+        Invokes another workflow registered via serve_many and waits for its result.
+
+        ```python
+        child_workflow = create_async_workflow(my_child_fn)
+
+        result = await context.invoke(
+            "invoke-child",
+            workflow=child_workflow,
+            body={"key": "value"},
+        )
+        print(result.body)        # result from child workflow
+        print(result.is_failed)   # True if child workflow failed
+        print(result.is_canceled) # True if child workflow was canceled
+        ```
+
+        :param step_name: name of the step
+        :param workflow: InvokableWorkflow to invoke (must be registered via serve_many)
+        :param body: payload to send to the invoked workflow
+        :param headers: optional headers to forward
+        :param retries: number of retries
+        :return: InvokeStepResponse with body, is_failed, is_canceled
+        """
+        if not workflow.workflow_id:
+            raise WorkflowError(
+                "Workflow does not have a workflow_id. "
+                "Make sure to register it with serve_many before invoking."
+            )
+
+        invoke_url = _derive_invoke_url(self.url, workflow.workflow_id)
+
+        result = await self._add_step(
+            _LazyInvokeStep(
+                step_name,
+                url=invoke_url,
+                body=body,
+                headers=headers,
+                retries=retries,
+            )
+        )
+
+        try:
+            if isinstance(result, dict):
+                return InvokeStepResponse(
+                    body=json.loads(result["body"])
+                    if isinstance(result.get("body"), str)
+                    else result.get("body"),
+                    is_failed=result.get("is_failed", False),
+                    is_canceled=result.get("is_canceled", False),
+                )
+            return InvokeStepResponse(body=result)
+        except Exception:
+            return InvokeStepResponse(body=result)
 
     async def _add_step(self, step: _BaseLazyStep[TResult]) -> TResult:
         """
