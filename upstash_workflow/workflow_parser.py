@@ -224,7 +224,7 @@ def _handle_failure(
         workflow_run_id = payload["workflowRunId"]
 
         decoded_body = _decode_base64(body) if body else "{}"
-        error_payload = json.loads(decoded_body)
+        error_payload = json.loads(decoded_body) if decoded_body.strip() else {}
 
         # Create context
         workflow_context = WorkflowContext(
