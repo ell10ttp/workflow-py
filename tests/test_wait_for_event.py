@@ -1,13 +1,14 @@
 import inspect
 import pytest
 from dataclasses import is_dataclass
+from typing import Any
 
 
 class TestStepDataclassExtensions:
     def test_step_has_wait_event_id_field(self) -> None:
         from upstash_workflow.types import Step
 
-        step = Step(
+        step: Step[Any, Any] = Step(
             step_id=1,
             step_name="wait-step",
             step_type="Wait",
@@ -19,7 +20,7 @@ class TestStepDataclassExtensions:
     def test_step_has_wait_timeout_field(self) -> None:
         from upstash_workflow.types import Step
 
-        step = Step(
+        step: Step[Any, Any] = Step(
             step_id=1,
             step_name="wait-step",
             step_type="Wait",

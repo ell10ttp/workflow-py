@@ -38,7 +38,7 @@ async def _handle_failure(
     route_function: Callable[[AsyncWorkflowContext[TInitialPayload]], Awaitable[None]],
     failure_function: Optional[
         Callable[
-            [AsyncWorkflowContext[TInitialPayload], int, str, Dict[str, str]],
+            [AsyncWorkflowContext[TInitialPayload], int, Optional[str], Dict[str, str]],
             Awaitable[Any],
         ]
     ],
@@ -65,7 +65,7 @@ async def _handle_failure(
         workflow_run_id = payload["workflowRunId"]
 
         decoded_body = _decode_base64(body) if body else "{}"
-        error_payload = json.loads(decoded_body)
+        error_payload = json.loads(decoded_body) if decoded_body.strip() else {}
 
         # Create context
         workflow_context = AsyncWorkflowContext(

@@ -32,7 +32,10 @@ class Serve:
         retries: Optional[int] = None,
         url: Optional[str] = None,
         failure_function: Optional[
-            Callable[[AsyncWorkflowContext, int, str, Dict[str, str]], Awaitable[Any]]
+            Callable[
+                [AsyncWorkflowContext, int, Optional[str], Dict[str, str]],
+                Awaitable[Any],
+            ]
         ] = None,
         failure_url: Optional[str] = None,
     ) -> Callable[
