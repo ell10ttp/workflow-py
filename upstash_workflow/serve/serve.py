@@ -42,7 +42,7 @@ def _serve_base(
     retries: Optional[int] = None,
     url: Optional[str] = None,
     failure_function: Optional[
-        Callable[[WorkflowContext, int, str, Dict[str, str]], Any]
+        Callable[[WorkflowContext, int, Optional[str], Dict[str, str]], Any]
     ] = None,
     failure_url: Optional[str] = None,
 ) -> Dict[str, Callable[[TRequest], TResponse]]:
@@ -195,7 +195,7 @@ def serve(
     retries: Optional[int] = None,
     url: Optional[str] = None,
     failure_function: Optional[
-        Callable[[WorkflowContext, int, str, Dict[str, str]], Any]
+        Callable[[WorkflowContext, int, Optional[str], Dict[str, str]], Any]
     ] = None,
     failure_url: Optional[str] = None,
 ) -> Dict[str, Callable[[TRequest], TResponse]]:
@@ -239,7 +239,7 @@ def serve_many(
     retries: Optional[int] = None,
     url: Optional[str] = None,
     failure_url: Optional[str] = None,
-) -> Dict[str, Callable[[TRequest], TResponse]]:
+) -> Dict[str, Callable[[TRequest], _Response]]:
     """
     Creates a handler that routes incoming requests to the correct workflow
     based on the last URL path segment.
@@ -277,7 +277,7 @@ def serve_many(
     # Create a handler per workflow
     handlers: Dict[str, Callable] = {}
     for wf_id, workflow in workflows.items():
-        result = _serve_base(
+        result: Dict[str, Callable] = _serve_base(
             workflow.route_function,
             qstash_client=qstash_client,
             initial_payload_parser=initial_payload_parser,
@@ -290,7 +290,7 @@ def serve_many(
         )
         handlers[wf_id] = result["handler"]
 
-    def _router(request: TRequest) -> TResponse:
+    def _router(request: TRequest) -> _Response:
         path = request.url.rstrip("/")
         segment = path.rsplit("/", 1)[-1]
         # Strip query string from segment
@@ -298,12 +298,9 @@ def serve_many(
             segment = segment.split("?", 1)[0]
         handler = handlers.get(segment)
         if handler is None:
-            return cast(
-                TResponse,
-                _Response(
-                    json.dumps({"error": f"Unknown workflow: {segment}"}),
-                    status=404,
-                ),
+            return _Response(
+                json.dumps({"error": f"Unknown workflow: {segment}"}),
+                status=404,
             )
         return handler(request)
 

@@ -38,7 +38,7 @@ async def _handle_failure(
     route_function: Callable[[AsyncWorkflowContext[TInitialPayload]], Awaitable[None]],
     failure_function: Optional[
         Callable[
-            [AsyncWorkflowContext[TInitialPayload], int, str, Dict[str, str]],
+            [AsyncWorkflowContext[TInitialPayload], int, Optional[str], Dict[str, str]],
             Awaitable[Any],
         ]
     ],

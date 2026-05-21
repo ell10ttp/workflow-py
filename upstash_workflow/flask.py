@@ -35,7 +35,7 @@ class Serve:
         retries: Optional[int] = None,
         url: Optional[str] = None,
         failure_function: Optional[
-            Callable[[WorkflowContext, int, str, Dict[str, str]], Any]
+            Callable[[WorkflowContext, int, Optional[str], Dict[str, str]], Any]
         ] = None,
         failure_url: Optional[str] = None,
     ) -> Callable[

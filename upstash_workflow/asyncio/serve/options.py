@@ -31,7 +31,9 @@ class ServeOptions(Generic[TInitialPayload, TResponse]):
     retries: int
     url: Optional[str]
     failure_function: Optional[
-        Callable[[AsyncWorkflowContext, int, str, Dict[str, str]], Awaitable[Any]]
+        Callable[
+            [AsyncWorkflowContext, int, Optional[str], Dict[str, str]], Awaitable[Any]
+        ]
     ]
     failure_url: Optional[str]
 
@@ -54,11 +56,13 @@ def _process_options(
     retries: Optional[int] = DEFAULT_RETRIES,
     url: Optional[str] = None,
     failure_function: Optional[
-        Callable[[AsyncWorkflowContext, int, str, Dict[str, str]], Awaitable[Any]]
+        Callable[
+            [AsyncWorkflowContext, int, Optional[str], Dict[str, str]], Awaitable[Any]
+        ]
     ] = None,
     failure_url: Optional[str] = None,
 ) -> ServeBaseOptions[TInitialPayload, TResponse]:
-    environment = env if env is not None else dict(os.environ)
+    environment: Dict[str, Optional[str]] = env if env is not None else dict(os.environ)
 
     receiver_environment_variables_set = bool(
         environment.get("QSTASH_CURRENT_SIGNING_KEY")

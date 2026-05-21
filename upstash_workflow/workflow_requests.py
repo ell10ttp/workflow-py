@@ -295,8 +295,8 @@ def _get_headers(
     :param invoke_retries: retries for invoke steps
     :return: headers to submit
     """
-    is_call = step and step.call_url
-    is_invoke = step and step.invoke_url
+    is_call = bool(step and step.call_url)
+    is_invoke = bool(step and step.invoke_url)
 
     base_headers = {
         WORKFLOW_INIT_HEADER: init_header_value,
@@ -373,7 +373,7 @@ def _get_headers(
         for header in user_headers.keys():
             header_value = user_headers.get(header)
             if header_value is not None:
-                if is_call and step.call_headers is not None:
+                if is_call and step is not None and step.call_headers is not None:
                     base_headers[f"Upstash-Callback-Forward-{header}"] = header_value
                 else:
                     base_headers[f"Upstash-Forward-{header}"] = header_value
@@ -386,6 +386,7 @@ def _get_headers(
 
     # Invoke step: set invoke headers and callback to parent workflow
     if is_invoke:
+        assert step is not None
         invoke_headers = {}
 
         # Forward invoke-specific headers to the child workflow
@@ -429,7 +430,7 @@ def _get_headers(
         )
 
     # Call step: set callback headers
-    if is_call and step.call_headers is not None:
+    if is_call and step is not None and step.call_headers is not None:
         forwarded_headers = {
             f"Upstash-Forward-{header}": value
             for header, value in step.call_headers.items()

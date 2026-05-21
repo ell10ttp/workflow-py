@@ -287,7 +287,7 @@ class WorkflowContext(Generic[TInitialPayload]):
 
         invoke_url = _derive_invoke_url(self.url, workflow.workflow_id)
 
-        result = await self._add_step(
+        result: Any = await self._add_step(
             _LazyInvokeStep(
                 step_name,
                 url=invoke_url,

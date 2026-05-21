@@ -41,7 +41,9 @@ def _serve_base(
     retries: Optional[int] = None,
     url: Optional[str] = None,
     failure_function: Optional[
-        Callable[[AsyncWorkflowContext, int, str, Dict[str, str]], Awaitable[Any]]
+        Callable[
+            [AsyncWorkflowContext, int, Optional[str], Dict[str, str]], Awaitable[Any]
+        ]
     ] = None,
     failure_url: Optional[str] = None,
 ) -> Dict[str, Callable[[TRequest], Awaitable[TResponse]]]:
@@ -185,7 +187,9 @@ def serve(
     retries: Optional[int] = None,
     url: Optional[str] = None,
     failure_function: Optional[
-        Callable[[AsyncWorkflowContext, int, str, Dict[str, str]], Awaitable[Any]]
+        Callable[
+            [AsyncWorkflowContext, int, Optional[str], Dict[str, str]], Awaitable[Any]
+        ]
     ] = None,
     failure_url: Optional[str] = None,
 ) -> Dict[str, Callable[[TRequest], Awaitable[TResponse]]]:
@@ -255,7 +259,7 @@ def serve_many(
     # Create a handler per workflow
     handlers: Dict[str, Callable] = {}
     for wf_id, workflow in workflows.items():
-        result = _serve_base(
+        result: Dict[str, Callable] = _serve_base(
             workflow.route_function,
             qstash_client=qstash_client,
             initial_payload_parser=initial_payload_parser,
